@@ -1,0 +1,29 @@
+# Example configuration for the benchmarking tool
+endpoints:
+  - url: "http://example.com/api/resource"
+    method: "GET"
+  - url: "http://example.com/api/resource"
+    method: "POST"
+    body: '{"key": "value"}'
+    headers:
+      Content-Type: "application/json"
+  - url: "http://example.com/api/resource/123"
+    method: "DELETE"
+    headers:
+      Authorization: "Bearer <token>"
+
+# Mode can be "fixed" or "ramp"
+mode: "fixed"
+
+# Total duration for the test in seconds
+durationSeconds: 60
+requestTimeoutMs: 1000 # Timeout for individual HTTP requests in milliseconds
+
+# Settings for "fixed" mode
+requestsPerSecond: 100 # Target RPS
+
+# Settings for "ramp" mode
+initialRps: 10         # Starting RPS
+rampUpPeriodSec: 30    # Increase RPS every 30 seconds
+rpsIncrement: 10       # Increase RPS by 10
+maxRps: 1000           # Optional: Stop ramping up if this RPS is reached
