@@ -72,23 +72,23 @@ func (r *Runner) runFixedRPSMode() (*BenchmarkResult, error) {
 		return nil, fmt.Errorf("no endpoints configured")
 	}
 
-		var wg sync.WaitGroup
-		startTime := time.Now()
-		totalDuration := time.Duration(r.cfg.DurationSeconds) * time.Second
-		ticker := time.NewTicker(time.Second / time.Duration(r.cfg.RequestsPerSecond))
-		defer ticker.Stop()
-	
-		// Start collector goroutine
-		collectorWg := sync.WaitGroup{}
-		collectorWg.Add(1)
-		go func() {
-			defer collectorWg.Done()
-			for detail := range r.resultsCh {
-				r.collector.AppendDetail(detail)
-			}
-		}()
-	
-		requestCount := 0
+	var wg sync.WaitGroup
+	startTime := time.Now()
+	totalDuration := time.Duration(r.cfg.DurationSeconds) * time.Second
+	ticker := time.NewTicker(time.Second / time.Duration(r.cfg.RequestsPerSecond))
+	defer ticker.Stop()
+
+	// Start collector goroutine
+	collectorWg := sync.WaitGroup{}
+	collectorWg.Add(1)
+	go func() {
+		defer collectorWg.Done()
+		for detail := range r.resultsCh {
+			r.collector.AppendDetail(detail)
+		}
+	}()
+
+	requestCount := 0
 	
 	loop:
 		for time.Since(startTime) < totalDuration {
