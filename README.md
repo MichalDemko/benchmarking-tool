@@ -24,48 +24,25 @@ A flexible HTTP benchmarking tool for load testing APIs with support for multipl
    ```sh
    git clone <your-repo-url>
    cd benchmarking-tool
+   go mod tidy              # Install dependencies
    go build -o benchmarking-tool
    ```
 
 2. Run with the included example:
    ```sh
-   ./benchmarking-tool run-config/simple-example.yml
+   ./benchmarking-tool config-examples/simple-example.yml
    ```
 
 3. Create your own configuration:
    ```sh
-   cp run-config/simple-example.yml my-test.yml
+   cp config-examples/simple-example.yml my-test.yml
    # Edit my-test.yml to match your API
    ./benchmarking-tool my-test.yml
    ```
 
-### Setup
-1. Clone the repository:
-   ```sh
-   git clone <your-repo-url>
-   cd benchmarking-tool
-   ```
-2. Install dependencies:
-   ```sh
-   go mod tidy
-   ```
-3. Create your configuration file:
-   ```sh
-   # Use the provided example as a starting point
-   cp run-config/simple-example.yml my-config.yml
-   # Edit my-config.yml to match your endpoints and test parameters
-   ```
-4. Run the benchmarking tool:
-   ```sh
-   go run main.go my-config.yml
-   # or build and run
-   go build -o benchmarking-tool
-   ./benchmarking-tool my-config.yml
-   ```
-
 ## Configuration
 
-The tool uses YAML configuration files to define endpoints, parameter generation, and test execution settings. See `run-config/simple-example.yml` for a working example.
+The tool uses YAML configuration files to define endpoints, parameter generation, and test execution settings. See `config-examples/simple-example.yml` for a working example.
 
 ### Configuration Structure
 
@@ -336,11 +313,11 @@ execution:
 
 The repository includes several example configurations:
 
-- ✅ **`run-config/simple-example.yml`**: Basic configuration demonstrating GET and POST endpoints with parameter generation
+- ✅ **`config-examples/simple-example.yml`**: Basic configuration demonstrating GET and POST endpoints with parameter generation
 - ✅ **`config.yaml`**: Default configuration file (copy of simple-example.yml)
 - ✅ **`config-clean-example.yaml`**: Enhanced example showcasing the new `$ref` syntax and static strings
 
-⚠️ **Note**: Some older configuration files in `run-config/` may use outdated syntax or unsupported generator types. Use the files marked with ✅ above as reliable templates for your own configurations.
+⚠️ **Note**: Some older configuration files in `config-examples/` may use outdated syntax or unsupported generator types. Use the files marked with ✅ above as reliable templates for your own configurations.
 
 Each example demonstrates different aspects of the configuration system and can be used as templates for your own tests.
 
