@@ -1,0 +1,104 @@
+# Enhanced Configuration Example with Clean Syntax
+# This demonstrates the improved readability with explicit static strings and generator references
+
+baseUrls:
+  - "http://0.0.0.0:8080"
+
+execution:
+  mode: "fixed"
+  durationSeconds: 5
+  requestTimeoutMs: 2000
+  requestsPerSecond: 2
+
+# Named parameter generators for reuse
+parameterGenerators:
+  user_id:
+    type: "formattedInt"
+    min: 1000
+    max: 9999
+    format: "user_{}"
+  
+  age:
+    type: "randomInt"
+    min: 18
+    max: 65
+  
+  status:
+    type: "choice"
+    values: ["active", "inactive", "pending"]
+    weights: [0.7, 0.2, 0.1]
+  
+  username:
+    type: "randomString"
+    length: 8
+    charset: "alpha_lower"
+
+endpoints:
+  # GET endpoint with path parameters and static query params
+  get_user:
+    path: "/api/v1/users/{user_id}"
+    method: "GET"
+    
+    pathParameters:
+      user_id:
+        $ref: "user_id"          # Reference to named generator
+    
+    queryParameters:
+      fields: "id,name,email"    # Static string - always this value
+      format: "json"             # Another static string
+      include_metadata: "true"   # Static boolean as string
+
+  # POST endpoint with complex body using mix of references and inline definitions
+  create_user:
+    path: "/api/v1/users"
+    method: "POST"
+    headers:
+      Content-Type: "application/json"
+      X-API-Version: "v1"        # Static header value
+    
+    bodyParameters:
+      type: "object"
+      properties:
+        username:
+          $ref: "username"       # Reference to named generator
+        age:
+          $ref: "age"            # Reference to named generator
+        status:
+          $ref: "status"         # Reference to named generator
+        email:
+          type: "template"       # Inline generator definition
+          template: "{{username}}@example.com"
+          parameters:
+            username:
+              $ref: "username"
+        preferences:
+          type: "object"
+          properties:
+            theme: "dark"        # Static string in nested object
+            notifications: "enabled"  # Another static string
+            language:
+              type: "choice"     # Inline generator in nested object
+              values: ["en", "es", "fr", "de"]
+
+  # PATCH endpoint with simple body
+  update_user_status:
+    path: "/api/v1/users/{user_id}/status"
+    method: "PATCH"
+    
+    pathParameters:
+      user_id:
+        $ref: "user_id"
+    
+    bodyParameters:
+      type: "object"
+      properties:
+        status:
+          $ref: "status"
+        reason: "Administrative update"  # Static reason
+
+endpointSelection:
+  strategy: "weighted"
+  weights:
+    get_user: 0.5
+    create_user: 0.3
+    update_user_status: 0.2

@@ -31,10 +31,10 @@ func (r *Reporter) Generate(cfg *config.Config, results metrics.AggregatedResult
 	fmt.Fprintf(writer, "Metric\tValue\n")
 	fmt.Fprintf(writer, "------\t-----\n")
 
-	fmt.Fprintf(writer, "Test Mode\t%s\n", cfg.Mode)
-	fmt.Fprintf(writer, "Configured Duration\t%ds\n", cfg.DurationSeconds)
-	if cfg.Mode == "fixed" {
-		fmt.Fprintf(writer, "Configured RPS\t%d\n", cfg.RequestsPerSecond)
+	fmt.Fprintf(writer, "Test Mode\t%s\n", cfg.Execution.Mode)
+	fmt.Fprintf(writer, "Configured Duration\t%ds\n", cfg.Execution.DurationSeconds)
+	if cfg.Execution.Mode == "fixed" {
+		fmt.Fprintf(writer, "Configured RPS\t%d\n", cfg.Execution.RequestsPerSecond)
 	}
 
 	fmt.Fprintf(writer, "Total Requests\t%d\n", results.TotalRequests)

@@ -1,0 +1,77 @@
+# Simplified Enhanced Configuration Example
+# Focus on the most important new features
+
+baseUrls:
+  - "http://0.0.0.0:8080"
+
+execution:
+  mode: "fixed"
+  durationSeconds: 5 # Default is infinite
+  requestTimeoutMs: 2000 # Timeout for individual HTTP requests in milliseconds
+  requestsPerSecond: 50
+
+# Core parameter generators
+parameterGenerators:
+  user_id:
+    type: "formattedInt"  # Explicitly use formattedInt for string output
+    min: 1000
+    max: 9999
+    format: "user_{}"  # Results in user_1234, user_5678, etc.
+  
+  age:
+    type: "randomInt"  # Use randomInt for plain integer output
+    min: 18
+    max: 65
+  
+  status:
+    type: "choice"
+    values: ["active", "inactive"]
+    weights: [0.8, 0.2]
+
+endpoints:
+  # GET with path and query parameters
+  get_user:
+    path: "/api/v1/users/{user_id}"
+    method: "GET"
+    
+    pathParameters:
+      user_id:
+        $ref: "user_id"
+    
+    queryParameters:
+      fields: "id,name,email"  # Static string
+
+  # POST with body parameters - search/filter endpoint
+  search_users:
+    path: "/api/v1/users/search"
+    method: "POST"
+    headers:
+      Content-Type: "application/json"
+    
+    bodyParameters:
+      type: "object"
+      properties:
+        query:
+          type: "choice"
+          values: ["john", "jane", "admin", "test", "user"]
+        filters:
+          type: "object"
+          properties:
+            status:
+              $ref: "status"
+            minAge:
+              $ref: "age"
+            maxAge:
+              type: "randomInt"  # Plain integer for age value
+              min: 65
+              max: 80
+        limit:
+          type: "randomInt"  # Plain integer for limit value
+          min: 10
+          max: 100
+
+endpointSelection:
+  strategy: "weighted"
+  weights:
+    get_user: 0.6
+    search_users: 0.4

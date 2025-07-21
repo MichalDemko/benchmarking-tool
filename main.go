@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"benchmarking-tool/config"
-	"benchmarking-tool/metrics" // Added import
+	"benchmarking-tool/metrics"
 	"benchmarking-tool/reporter"
 	"benchmarking-tool/runner"
 )
@@ -14,36 +14,39 @@ import (
 func main() {
 	fmt.Println("Starting benchmarking tool...")
 
-	// Initialize Go Modules if you haven't: go mod init benchmarking-tool
-	// Then: go mod tidy
+	// Get config file from command line or use default
+	configFile := "config.yaml"
+	if len(os.Args) > 1 {
+		configFile = os.Args[1]
+	}
 
-	cfg, err := config.LoadConfig("config.yaml")
+	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
-		os.Exit(1)
 	}
 
-	fmt.Printf("Configuration loaded: Mode='%s', Duration=%ds, RPS (Fixed)=%d\n", cfg.Mode, cfg.DurationSeconds, cfg.RequestsPerSecond)
+	fmt.Printf("Configuration loaded: Mode='%s', Duration=%ds, RPS=%d\n", 
+		cfg.Execution.Mode, cfg.Execution.DurationSeconds, cfg.Execution.RequestsPerSecond)
+	fmt.Printf("Base URLs: %v\n", cfg.BaseUrls)
 	fmt.Printf("Endpoints to test: %d\n", len(cfg.Endpoints))
-	for _, ep := range cfg.Endpoints {
-		fmt.Printf("  - %s %s\n", ep.Method, ep.URL)
+	for name, ep := range cfg.Endpoints {
+		fmt.Printf("  - %s: %s %s\n", name, ep.Method, ep.Path)
 	}
+	fmt.Printf("Parameter generators defined: %d\n", len(cfg.ParameterGenerators))
 
 	metricsCollector := metrics.NewCollector()
-
 	benchmarkRunner := runner.NewRunner(cfg, metricsCollector)
 
-	_, err = benchmarkRunner.Run() // Runner itself doesn't return detailed results directly
+	_, err = benchmarkRunner.Run()
 	if err != nil {
 		log.Fatalf("Error during benchmark execution: %v", err)
 	}
 
-	// Get aggregated results from the collector
 	finalResults := metricsCollector.GetResults()
-
-	// Initialize reporter and generate report
-	reportGenerator := reporter.NewReporter()
-	reportGenerator.Generate(cfg, finalResults) // Pass config for context if needed by reporter
+	
+	// Generate report using the proper Reporter
+	rep := reporter.NewReporter()
+	rep.Generate(cfg, finalResults)
 
 	fmt.Println("Benchmarking tool finished.")
 }
