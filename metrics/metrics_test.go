@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -19,97 +20,94 @@ func TestNewCollector(t *testing.T) {
 	}
 }
 
-func TestCollector_RecordRequest_Success(t *testing.T) {
-	collector := NewCollector()
-
-	collector.RecordRequest(
-		"https://api.example.com/test",
-		"GET",
-		200,
-		100*time.Millisecond,
-		false,
-		"",
-	)
-
-	results := collector.GetResults()
-	if results.TotalRequests != 1 {
-		t.Errorf("Expected 1 total request, got %d", results.TotalRequests)
+func TestCollector_RecordRequest(t *testing.T) {
+	testCases := []struct {
+		name                 string
+		url                  string
+		method               string
+		statusCode           int
+		duration             time.Duration
+		isError              bool
+		errorMsg             string
+		expectedTotal        int64
+		expectedSuccessful   int64
+		expectedFailed       int64
+		expectedStatusCount  int64
+		expectedErrorCount   int
+		expectedAvgDuration  time.Duration
+	}{
+		{
+			name:                 "Successful request",
+			url:                  "https://api.example.com/test",
+			method:               "GET",
+			statusCode:           200,
+			duration:             100 * time.Millisecond,
+			isError:              false,
+			errorMsg:             "",
+			expectedTotal:        1,
+			expectedSuccessful:   1,
+			expectedFailed:       0,
+			expectedStatusCount:  1,
+			expectedAvgDuration:  100 * time.Millisecond,
+		},
+		{
+			name:                 "Request with network error",
+			url:                  "https://api.example.com/test",
+			method:               "GET",
+			statusCode:           0,
+			duration:             5 * time.Second,
+			isError:              true,
+			errorMsg:             "connection timeout",
+			expectedTotal:        1,
+			expectedSuccessful:   0,
+			expectedFailed:       1,
+			expectedStatusCount:  1,
+			expectedErrorCount:   1,
+			expectedAvgDuration:  5 * time.Second,
+		},
+		{
+			name:                 "Request with HTTP error status",
+			url:                  "https://api.example.com/notfound",
+			method:               "GET",
+			statusCode:           404,
+			duration:             50 * time.Millisecond,
+			isError:              false,
+			errorMsg:             "",
+			expectedTotal:        1,
+			expectedSuccessful:   0,
+			expectedFailed:       1,
+			expectedStatusCount:  1,
+			expectedAvgDuration:  50 * time.Millisecond,
+		},
 	}
 
-	if results.SuccessfulRequests != 1 {
-		t.Errorf("Expected 1 successful request, got %d", results.SuccessfulRequests)
-	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			collector := NewCollector()
+			collector.RecordRequest(tc.url, tc.method, tc.statusCode, tc.duration, tc.isError, tc.errorMsg)
+			results := collector.GetResults()
 
-	if results.FailedRequests != 0 {
-		t.Errorf("Expected 0 failed requests, got %d", results.FailedRequests)
-	}
-
-	if results.StatusCodesCount[200] != 1 {
-		t.Errorf("Expected 1 request with status 200, got %d", results.StatusCodesCount[200])
-	}
-
-	if results.AvgDuration != 100*time.Millisecond {
-		t.Errorf("Expected average duration 100ms, got %v", results.AvgDuration)
-	}
-}
-
-func TestCollector_RecordRequest_Error(t *testing.T) {
-	collector := NewCollector()
-
-	collector.RecordRequest(
-		"https://api.example.com/test",
-		"GET",
-		0,
-		5*time.Second,
-		true,
-		"connection timeout",
-	)
-
-	results := collector.GetResults()
-	if results.TotalRequests != 1 {
-		t.Errorf("Expected 1 total request, got %d", results.TotalRequests)
-	}
-
-	if results.SuccessfulRequests != 0 {
-		t.Errorf("Expected 0 successful requests, got %d", results.SuccessfulRequests)
-	}
-
-	if results.FailedRequests != 1 {
-		t.Errorf("Expected 1 failed request, got %d", results.FailedRequests)
-	}
-
-	if results.ErrorDetails["connection timeout"] != 1 {
-		t.Errorf("Expected 1 'connection timeout' error, got %d", results.ErrorDetails["connection timeout"])
-	}
-}
-
-func TestCollector_RecordRequest_HTTP_Error(t *testing.T) {
-	collector := NewCollector()
-
-	collector.RecordRequest(
-		"https://api.example.com/notfound",
-		"GET",
-		404,
-		50*time.Millisecond,
-		false,
-		"",
-	)
-
-	results := collector.GetResults()
-	if results.TotalRequests != 1 {
-		t.Errorf("Expected 1 total request, got %d", results.TotalRequests)
-	}
-
-	if results.SuccessfulRequests != 0 {
-		t.Errorf("Expected 0 successful requests, got %d", results.SuccessfulRequests)
-	}
-
-	if results.FailedRequests != 1 {
-		t.Errorf("Expected 1 failed request, got %d", results.FailedRequests)
-	}
-
-	if results.StatusCodesCount[404] != 1 {
-		t.Errorf("Expected 1 request with status 404, got %d", results.StatusCodesCount[404])
+			if results.TotalRequests != tc.expectedTotal {
+				t.Errorf("Expected %d total requests, got %d", tc.expectedTotal, results.TotalRequests)
+			}
+			if results.SuccessfulRequests != tc.expectedSuccessful {
+				t.Errorf("Expected %d successful requests, got %d", tc.expectedSuccessful, results.SuccessfulRequests)
+			}
+			if results.FailedRequests != tc.expectedFailed {
+				t.Errorf("Expected %d failed requests, got %d", tc.expectedFailed, results.FailedRequests)
+			}
+			if results.StatusCodesCount[tc.statusCode] != tc.expectedStatusCount {
+				t.Errorf("Expected %d requests with status %d, got %d", tc.expectedStatusCount, tc.statusCode, results.StatusCodesCount[tc.statusCode])
+			}
+			if tc.isError {
+				if results.ErrorDetails[tc.errorMsg] != tc.expectedErrorCount {
+					t.Errorf("Expected %d '%s' error, got %d", tc.expectedErrorCount, tc.errorMsg, results.ErrorDetails[tc.errorMsg])
+				}
+			}
+			if results.AvgDuration != tc.expectedAvgDuration {
+				t.Errorf("Expected average duration %v, got %v", tc.expectedAvgDuration, results.AvgDuration)
+			}
+		})
 	}
 }
 
@@ -254,12 +252,14 @@ func TestCollector_AppendDetail(t *testing.T) {
 
 func TestCollector_ConcurrentAccess(t *testing.T) {
 	collector := NewCollector()
+	numGoroutines := 50
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
 
 	// Test concurrent recording of requests
-	done := make(chan bool, 10)
-
-	for i := 0; i < 10; i++ {
+	for i := 0; i < numGoroutines; i++ {
 		go func(id int) {
+			defer wg.Done()
 			collector.RecordRequest(
 				"https://api.example.com/test",
 				"GET",
@@ -268,22 +268,63 @@ func TestCollector_ConcurrentAccess(t *testing.T) {
 				false,
 				"",
 			)
-			done <- true
 		}(i)
 	}
 
-	// Wait for all goroutines to complete
-	for i := 0; i < 10; i++ {
-		<-done
-	}
+	wg.Wait()
 
 	results := collector.GetResults()
-	if results.TotalRequests != 10 {
-		t.Errorf("Expected 10 requests after concurrent recording, got %d", results.TotalRequests)
+	if results.TotalRequests != int64(numGoroutines) {
+		t.Errorf("Expected %d requests after concurrent recording, got %d", numGoroutines, results.TotalRequests)
 	}
 
-	if results.SuccessfulRequests != 10 {
-		t.Errorf("Expected 10 successful requests, got %d", results.SuccessfulRequests)
+	if results.SuccessfulRequests != int64(numGoroutines) {
+		t.Errorf("Expected %d successful requests, got %d", numGoroutines, results.SuccessfulRequests)
+	}
+
+	if results.FailedRequests != 0 {
+		t.Errorf("Expected 0 failed requests, got %d", results.FailedRequests)
+	}
+}
+
+func TestCollector_GetResults_Race(t *testing.T) {
+	collector := NewCollector()
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Goroutine to continuously record requests
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			collector.RecordRequest("url", "GET", 200, 10*time.Millisecond, false, "")
+			time.Sleep(1 * time.Millisecond)
+		}
+	}()
+
+	// Goroutine to continuously get results
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			_ = collector.GetResults()
+			time.Sleep(1 * time.Millisecond)
+		}
+	}()
+
+	wg.Wait()
+}
+
+func TestCollector_RecordRequest_EdgeCases(t *testing.T) {
+	collector := NewCollector()
+
+	// Test case with status code 399 (should be successful)
+	collector.RecordRequest("url", "GET", 399, 10*time.Millisecond, false, "")
+
+	results := collector.GetResults()
+	if results.SuccessfulRequests != 1 {
+		t.Errorf("Expected 1 successful request for status 399, got %d", results.SuccessfulRequests)
+	}
+	if results.FailedRequests != 0 {
+		t.Errorf("Expected 0 failed requests for status 399, got %d", results.FailedRequests)
 	}
 }
 
