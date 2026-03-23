@@ -18,10 +18,16 @@ type ExecutionConfig struct {
 
 // ParameterGenerator defines how to generate parameter values
 type ParameterGenerator struct {
-	Type             string         `yaml:"type"`                       // "randomInt", "choice", "static", "randomString", "template", "object", "array"
+	Type             string         `yaml:"type"`                       // generator discriminator
 	Min              *int           `yaml:"min,omitempty"`              // For randomInt
 	Max              *int           `yaml:"max,omitempty"`              // For randomInt
-	Format           string         `yaml:"format,omitempty"`           // Format string with {} placeholder
+	Format           string         `yaml:"format,omitempty"`           // formattedInt / randomInt+format; timestamp format (unix|rfc3339|iso8601)
+	Start            *int           `yaml:"start,omitempty"`            // sequence
+	Increment        *int           `yaml:"increment,omitempty"`        // sequence (default 1)
+	Precision        *int           `yaml:"precision,omitempty"`        // randomFloat decimal places
+	Probability      *float64       `yaml:"probability,omitempty"`      // randomBool P(true)
+	MinFloat         *float64       `yaml:"minFloat,omitempty"`         // randomFloat when YAML min is not an int
+	MaxFloat         *float64       `yaml:"maxFloat,omitempty"`         // randomFloat
 	Values           []any          `yaml:"values,omitempty"`           // For choice type
 	Weights          []float64      `yaml:"weights,omitempty"`          // For weighted choice
 	Value            any            `yaml:"value,omitempty"`            // For static type
@@ -29,7 +35,9 @@ type ParameterGenerator struct {
 	Charset          string         `yaml:"charset,omitempty"`          // For randomString
 	Template         string         `yaml:"template,omitempty"`         // For template type
 	Parameters       map[string]any `yaml:"parameters,omitempty"`       // For template type
+	Params           map[string]any `yaml:"params,omitempty"`           // Alias for parameters (template)
 	Properties       map[string]any `yaml:"properties,omitempty"`       // For object type
+	Fields           map[string]any `yaml:"fields,omitempty"`           // Alias for properties (object)
 	MinLength        *int           `yaml:"minLength,omitempty"`        // For array type
 	MaxLength        *int           `yaml:"maxLength,omitempty"`        // For array type
 	ElementGenerator any            `yaml:"elementGenerator,omitempty"` // For array type
@@ -176,6 +184,24 @@ func (cfg *Config) createGeneratorFromDef(genDef ParameterGenerator) (Generator,
 	if genDef.Format != "" {
 		defMap["format"] = genDef.Format
 	}
+	if genDef.Start != nil {
+		defMap["start"] = *genDef.Start
+	}
+	if genDef.Increment != nil {
+		defMap["increment"] = *genDef.Increment
+	}
+	if genDef.Precision != nil {
+		defMap["precision"] = *genDef.Precision
+	}
+	if genDef.Probability != nil {
+		defMap["probability"] = *genDef.Probability
+	}
+	if genDef.MinFloat != nil {
+		defMap["min"] = *genDef.MinFloat
+	}
+	if genDef.MaxFloat != nil {
+		defMap["max"] = *genDef.MaxFloat
+	}
 	if genDef.Values != nil {
 		defMap["values"] = genDef.Values
 	}
@@ -197,8 +223,14 @@ func (cfg *Config) createGeneratorFromDef(genDef ParameterGenerator) (Generator,
 	if genDef.Parameters != nil {
 		defMap["parameters"] = genDef.Parameters
 	}
+	if genDef.Params != nil {
+		defMap["params"] = genDef.Params
+	}
 	if genDef.Properties != nil {
 		defMap["properties"] = genDef.Properties
+	}
+	if genDef.Fields != nil {
+		defMap["fields"] = genDef.Fields
 	}
 	if genDef.MinLength != nil {
 		defMap["minLength"] = *genDef.MinLength

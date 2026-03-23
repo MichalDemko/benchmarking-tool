@@ -27,3 +27,4 @@ go.work
 yarn.lock
 package-lock.json
 
+benchmarking-tool

@@ -1,0 +1,206 @@
+# Showcases parameterGenerators the tool supports. Use $ref for named generators;
+# a bare string value is static text, not a reference.
+# Headers are literal strings (no {{...}} substitution).
+
+baseUrls:
+  - "http://0.0.0.0:8080"
+
+execution:
+  mode: "fixed"
+  durationSeconds: 5
+  requestTimeoutMs: 2000
+  requestsPerSecond: 8
+
+parameterGenerators:
+  api_version:
+    type: "static"
+    value: "v2"
+
+  order_number:
+    type: "sequence"
+    start: 100000
+    increment: 1
+    format: "ORD-{}"
+
+  session_id:
+    type: "randomString"
+    length: 24
+    charset: "hex"
+
+  transaction_id:
+    type: "uuid"
+
+  current_time:
+    type: "timestamp"
+    format: "iso8601"
+
+  unix_ts:
+    type: "timestamp"
+    format: "unix"
+
+  quantity:
+    type: "randomInt"
+    min: 1
+    max: 100
+
+  price:
+    type: "randomFloat"
+    minFloat: 1.0
+    maxFloat: 999.99
+    precision: 2
+
+  discount_percent:
+    type: "randomFloat"
+    minFloat: 0.0
+    maxFloat: 50.0
+    precision: 1
+
+  is_premium:
+    type: "randomBool"
+    probability: 0.3
+
+  category:
+    type: "choice"
+    values: ["electronics", "clothing", "books", "home", "sports"]
+
+  priority:
+    type: "choice"
+    values: ["low", "medium", "high", "urgent"]
+    weights: [0.4, 0.3, 0.2, 0.1]
+
+  full_name:
+    type: "template"
+    template: "{{first_name}} {{last_name}}"
+    parameters:
+      first_name:
+        type: "choice"
+        values: ["John", "Jane", "Alex"]
+      last_name:
+        type: "choice"
+        values: ["Smith", "Johnson", "Brown"]
+
+  shipping_address:
+    type: "object"
+    properties:
+      street:
+        type: "template"
+        template: "{{number}} {{street_name}}"
+        parameters:
+          number:
+            type: "randomInt"
+            min: 1
+            max: 9999
+          street_name:
+            type: "choice"
+            values: ["Main St", "Oak Ave", "First St"]
+      city:
+        type: "choice"
+        values: ["New York", "Los Angeles", "Chicago"]
+      zipCode:
+        type: "randomInt"
+        min: 10000
+        max: 99999
+
+  product_tags:
+    type: "array"
+    minLength: 1
+    maxLength: 4
+    elementGenerator:
+      type: "choice"
+      values: ["new", "popular", "sale", "featured"]
+
+  product_code:
+    type: "randomString"
+    length: 6
+    charset: "alpha_upper"
+
+  customer_profile:
+    type: "object"
+    properties:
+      personalInfo:
+        type: "object"
+        properties:
+          name:
+            $ref: "full_name"
+          age:
+            type: "randomInt"
+            min: 18
+            max: 80
+          email:
+            type: "template"
+            template: "{{name}}@example.com"
+            parameters:
+              name:
+                type: "randomString"
+                length: 8
+                charset: "alpha_lower"
+      preferences:
+        type: "array"
+        minLength: 2
+        maxLength: 4
+        elementGenerator:
+          $ref: "category"
+      isPremium:
+        $ref: "is_premium"
+
+endpoints:
+  create_order:
+    path: "/orders"
+    method: "POST"
+    headers:
+      Content-Type: "application/json"
+      X-API-Version: "v2"
+      X-Request-Id: "demo-request-id"
+    bodyParameters:
+      type: "object"
+      properties:
+        orderNumber:
+          $ref: "order_number"
+        customerId:
+          type: "randomInt"
+          min: 1000
+          max: 9999
+        items:
+          type: "array"
+          minLength: 1
+          maxLength: 3
+          elementGenerator:
+            type: "object"
+            properties:
+              productCode:
+                $ref: "product_code"
+              quantity:
+                $ref: "quantity"
+              price:
+                $ref: "price"
+              category:
+                $ref: "category"
+              tags:
+                $ref: "product_tags"
+        shippingAddress:
+          $ref: "shipping_address"
+        totalAmount:
+          $ref: "price"
+        discountPercent:
+          $ref: "discount_percent"
+        isPriority:
+          type: "randomBool"
+          probability: 0.15
+        customerProfile:
+          $ref: "customer_profile"
+        createdAt:
+          $ref: "current_time"
+        metadata:
+          type: "object"
+          properties:
+            sessionId:
+              $ref: "session_id"
+            transactionId:
+              $ref: "transaction_id"
+            ts:
+              $ref: "unix_ts"
+            version:
+              $ref: "api_version"
+
+endpointSelection:
+  strategy: "roundRobin"

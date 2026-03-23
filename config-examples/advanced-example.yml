@@ -1,0 +1,144 @@
+# Advanced example using the canonical schema (named endpoints, camelCase execution keys).
+# Demonstrates aliases: random_int, params on template, fields on object (supported by engine).
+
+baseUrls:
+  - "http://0.0.0.0:8080"
+
+execution:
+  mode: "fixed"
+  durationSeconds: 5
+  requestTimeoutMs: 3000
+  requestsPerSecond: 15
+
+parameterGenerators:
+  user_id:
+    type: "formattedInt"
+    min: 10000
+    max: 99999
+    format: "u_{}"
+
+  order_seq:
+    type: "sequence"
+    start: 1000
+    increment: 1
+    format: "ORD-{}"
+
+  trace_id:
+    type: "uuid"
+
+  when:
+    type: "timestamp"
+    format: "unix"
+
+  amount:
+    type: "random_float"
+    minFloat: 0.01
+    maxFloat: 5000.0
+    precision: 2
+
+  flag:
+    type: "random_bool"
+    trueProbability: 0.8
+
+  bio_text:
+    type: "random"
+    charset: "alphanumeric_space"
+    length: 40
+
+endpoints:
+  users_get:
+    path: "/users/{user_id}"
+    method: "GET"
+    pathParameters:
+      user_id:
+        $ref: "user_id"
+    queryParameters:
+      limit:
+        type: "random_int"
+        min: 5
+        max: 50
+      include:
+        type: "choice"
+        values: ["profile", "settings"]
+
+  users_post:
+    path: "/users"
+    method: "POST"
+    headers:
+      Content-Type: "application/json"
+    bodyParameters:
+      type: "object"
+      fields:
+        name:
+          type: "template"
+          template: "{{a}} {{b}}"
+          params:
+            a:
+              type: "choice"
+              values: ["Ada", "Bob"]
+            b:
+              type: "choice"
+              values: ["Smith", "Jones"]
+        email:
+          type: "template"
+          template: "{{u}}@example.com"
+          parameters:
+            u:
+              type: "randomString"
+              length: 5
+              charset: "alpha_lower"
+        age:
+          type: "random_int"
+          min: 18
+          max: 90
+        is_active:
+          $ref: "flag"
+        orderRef:
+          $ref: "order_seq"
+
+  orders_items_post:
+    path: "/orders/{order_id}/items"
+    method: "POST"
+    headers:
+      Content-Type: "application/json"
+      X-Trace-Id: "static-trace-header"
+    pathParameters:
+      order_id:
+        $ref: "order_seq"
+    queryParameters:
+      ts:
+        $ref: "when"
+    bodyParameters:
+      type: "object"
+      properties:
+        items:
+          type: "array"
+          minLength: 1
+          maxLength: 3
+          elementGenerator:
+            type: "object"
+            properties:
+              sku:
+                type: "random_int"
+                min: 100
+                max: 999
+              qty:
+                type: "random_int"
+                min: 1
+                max: 5
+              unit_price:
+                type: "random_float"
+                min: 1.0
+                max: 99.99
+                precision: 2
+        total:
+          $ref: "amount"
+        note:
+          $ref: "bio_text"
+
+endpointSelection:
+  strategy: "weighted"
+  weights:
+    users_get: 0.35
+    users_post: 0.35
+    orders_items_post: 0.30

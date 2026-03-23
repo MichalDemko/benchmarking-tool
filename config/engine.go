@@ -2,10 +2,15 @@ package config
 
 import (
 	"crypto/rand"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Generator interface for all parameter generators
@@ -203,13 +208,19 @@ type ReferenceGenerator struct {
 }
 
 func (g *ReferenceGenerator) Generate() (any, error) {
-	// Get the referenced generator from config
-	if genDef, exists := g.Config.ParameterGenerators[g.Name]; exists {
-		gen, err := g.Config.createGeneratorFromDef(genDef)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create referenced generator '%s': %w", g.Name, err)
+	if g.Config != nil && g.Config.engine != nil {
+		if gen, ok := g.Config.engine.GetGenerator(g.Name); ok {
+			return gen.Generate()
 		}
-		return gen.Generate()
+	}
+	if g.Config != nil {
+		if genDef, exists := g.Config.ParameterGenerators[g.Name]; exists {
+			gen, err := g.Config.createGeneratorFromDef(genDef)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create referenced generator '%s': %w", g.Name, err)
+			}
+			return gen.Generate()
+		}
 	}
 	return nil, fmt.Errorf("referenced generator '%s' not found", g.Name)
 }
@@ -245,6 +256,123 @@ func (g *ArrayGenerator) Generate() (any, error) {
 	}
 
 	return result, nil
+}
+
+// SequenceGenerator emits a monotonic counter (thread-safe).
+type SequenceGenerator struct {
+	mu        sync.Mutex
+	next      int
+	increment int
+	format    string
+}
+
+func newSequenceGenerator(start, increment int, format string) *SequenceGenerator {
+	if increment == 0 {
+		increment = 1
+	}
+	return &SequenceGenerator{next: start, increment: increment, format: format}
+}
+
+func (g *SequenceGenerator) Generate() (any, error) {
+	g.mu.Lock()
+	v := g.next
+	g.next += g.increment
+	g.mu.Unlock()
+	if g.format == "" {
+		return v, nil
+	}
+	return fmt.Sprintf(strings.ReplaceAll(g.format, "{}", "%d"), v), nil
+}
+
+// UUIDGenerator produces RFC 4122 version-4 UUID strings.
+type UUIDGenerator struct{}
+
+func (g *UUIDGenerator) Generate() (any, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return nil, fmt.Errorf("uuid: %w", err)
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%s-%s-%s-%s-%s",
+		hex.EncodeToString(b[0:4]),
+		hex.EncodeToString(b[4:6]),
+		hex.EncodeToString(b[6:8]),
+		hex.EncodeToString(b[8:10]),
+		hex.EncodeToString(b[10:16])), nil
+}
+
+// TimestampGenerator emits current time (UTC).
+type TimestampGenerator struct {
+	Format string
+}
+
+func (g *TimestampGenerator) Generate() (any, error) {
+	now := time.Now().UTC()
+	switch strings.ToLower(g.Format) {
+	case "unix":
+		return now.Unix(), nil
+	case "iso8601", "rfc3339", "":
+		return now.Format(time.RFC3339Nano), nil
+	default:
+		return now.Format(time.RFC3339Nano), nil
+	}
+}
+
+// RandomFloatGenerator samples a uniform float in [Min, Max].
+type RandomFloatGenerator struct {
+	Min       float64
+	Max       float64
+	Precision int
+}
+
+func (g *RandomFloatGenerator) Generate() (any, error) {
+	if g.Min >= g.Max {
+		return roundFloat(g.Min, g.Precision), nil
+	}
+	u, err := cryptoUniform01()
+	if err != nil {
+		return nil, err
+	}
+	v := g.Min + u*(g.Max-g.Min)
+	return roundFloat(v, g.Precision), nil
+}
+
+// RandomBoolGenerator returns true with probability PTrue.
+type RandomBoolGenerator struct {
+	PTrue float64
+}
+
+func (g *RandomBoolGenerator) Generate() (any, error) {
+	p := g.PTrue
+	if p <= 0 {
+		return false, nil
+	}
+	if p >= 1 {
+		return true, nil
+	}
+	u, err := cryptoUniform01()
+	if err != nil {
+		return nil, err
+	}
+	return u < p, nil
+}
+
+func cryptoUniform01() (float64, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return 0, err
+	}
+	u := binary.BigEndian.Uint64(b[:])
+	return float64(u>>11) / (1 << 53), nil
+}
+
+func roundFloat(v float64, prec int) float64 {
+	if prec < 0 {
+		return v
+	}
+	m := math.Pow10(prec)
+	return math.Round(v*m) / m
 }
 
 // ParameterEngine manages generator creation and execution
@@ -318,6 +446,8 @@ func (pe *ParameterEngine) createGeneratorWithConfig(def any, config *Config) (G
 		return nil, fmt.Errorf("invalid generator definition type: %T", def)
 	}
 
+	normalizeDefMapInPlace(defMap)
+
 	// Check for $ref reference syntax
 	if refName, exists := defMap["$ref"]; exists {
 		if genName, ok := refName.(string); ok {
@@ -341,6 +471,7 @@ func (pe *ParameterEngine) createGeneratorWithConfig(def any, config *Config) (G
 	if !ok {
 		return nil, fmt.Errorf("generator type not specified")
 	}
+	genType = canonicalGeneratorType(genType)
 
 	switch genType {
 	case "static":
@@ -399,7 +530,7 @@ func (pe *ParameterEngine) createGeneratorWithConfig(def any, config *Config) (G
 			Weights: weights,
 		}, nil
 
-	case "randomString":
+	case "random", "randomString":
 		length := getIntValue(defMap["length"], 10)
 		charset := getStringValue(defMap["charset"], "alphanumeric")
 
@@ -408,6 +539,35 @@ func (pe *ParameterEngine) createGeneratorWithConfig(def any, config *Config) (G
 			Charset: charset,
 		}, nil
 
+	case "sequence":
+		start := getIntValue(defMap["start"], 0)
+		inc := getIntValue(defMap["increment"], 1)
+		if inc == 0 {
+			inc = 1
+		}
+		format := getStringValue(defMap["format"], "")
+		return newSequenceGenerator(start, inc, format), nil
+
+	case "uuid":
+		return &UUIDGenerator{}, nil
+
+	case "timestamp":
+		format := getStringValue(defMap["format"], "rfc3339")
+		return &TimestampGenerator{Format: format}, nil
+
+	case "randomFloat":
+		minF := getFloatValue(defMap["min"], 0)
+		maxF := getFloatValue(defMap["max"], 1)
+		prec := getIntValue(defMap["precision"], -1)
+		return &RandomFloatGenerator{Min: minF, Max: maxF, Precision: prec}, nil
+
+	case "randomBool":
+		p := getFloatValue(defMap["probability"], 0.5)
+		if _, hasTrueProb := defMap["trueProbability"]; hasTrueProb {
+			p = getFloatValue(defMap["trueProbability"], 0.5)
+		}
+		return &RandomBoolGenerator{PTrue: p}, nil
+
 	case "template":
 		template := getStringValue(defMap["template"], "")
 		if template == "" {
@@ -415,7 +575,11 @@ func (pe *ParameterEngine) createGeneratorWithConfig(def any, config *Config) (G
 		}
 
 		parameters := make(map[string]Generator)
-		if params, exists := defMap["parameters"]; exists {
+		params := defMap["parameters"]
+		if params == nil {
+			params = defMap["params"]
+		}
+		if params != nil {
 			paramMap, ok := mapToStringAnyMap(params)
 			if !ok {
 				return nil, fmt.Errorf("template parameters must be a string-keyed map")
@@ -436,7 +600,11 @@ func (pe *ParameterEngine) createGeneratorWithConfig(def any, config *Config) (G
 
 	case "object":
 		properties := make(map[string]Generator)
-		if props, exists := defMap["properties"]; exists {
+		props := defMap["properties"]
+		if props == nil {
+			props = defMap["fields"]
+		}
+		if props != nil {
 			propMap, ok := mapToStringAnyMap(props)
 			if !ok {
 				return nil, fmt.Errorf("object properties must be a string-keyed map")
@@ -480,6 +648,56 @@ func (pe *ParameterEngine) createGeneratorWithConfig(def any, config *Config) (G
 }
 
 // Helper functions
+
+func normalizeValue(v any) any {
+	switch x := v.(type) {
+	case map[interface{}]interface{}:
+		out := make(map[string]any, len(x))
+		for k, val := range x {
+			if ks, ok := k.(string); ok {
+				out[ks] = normalizeValue(val)
+			}
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, val := range x {
+			out[k] = normalizeValue(val)
+		}
+		return out
+	case []any:
+		s := make([]any, len(x))
+		for i, val := range x {
+			s[i] = normalizeValue(val)
+		}
+		return s
+	default:
+		return v
+	}
+}
+
+func normalizeDefMapInPlace(m map[string]any) {
+	for k, v := range m {
+		m[k] = normalizeValue(v)
+	}
+}
+
+func canonicalGeneratorType(t string) string {
+	switch strings.ToLower(strings.ReplaceAll(t, "_", "")) {
+	case "randomint":
+		return "randomInt"
+	case "randomfloat":
+		return "randomFloat"
+	case "randombool":
+		return "randomBool"
+	case "formattedint":
+		return "formattedInt"
+	case "randomstring":
+		return "randomString"
+	default:
+		return t
+	}
+}
 
 func mapToStringAnyMap(raw any) (map[string]any, bool) {
 	switch m := raw.(type) {
@@ -532,6 +750,8 @@ func getCharset(charsetType string) string {
 		return "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	case "hex":
 		return "0123456789abcdef"
+	case "alphanumeric_space":
+		return "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 "
 	default:
 		return "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	}

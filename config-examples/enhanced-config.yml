@@ -1,0 +1,157 @@
+# Valid benchmarking-tool config (only keys honored by config.Config are applied).
+# Ignored if present: YAML merge anchors from unrelated documents, comments about future features.
+
+baseUrls:
+  - "http://0.0.0.0:8080"
+
+execution:
+  mode: "fixed"
+  durationSeconds: 5
+  requestTimeoutMs: 2000
+  requestsPerSecond: 10
+
+parameterGenerators:
+  auth_token:
+    type: "static"
+    value: "bearer-example-token"
+
+  user_id:
+    type: "sequence"
+    start: 1
+    increment: 1
+    format: "user_{}"
+
+  request_id:
+    type: "uuid"
+
+  created_at:
+    type: "timestamp"
+    format: "rfc3339"
+
+  age:
+    type: "randomInt"
+    min: 18
+    max: 80
+
+  price:
+    type: "randomFloat"
+    minFloat: 10.0
+    maxFloat: 199.99
+    precision: 2
+
+  is_active:
+    type: "randomBool"
+    probability: 0.65
+
+  status:
+    type: "choice"
+    values: ["active", "inactive", "pending"]
+    weights: [0.5, 0.3, 0.2]
+
+  username:
+    type: "randomString"
+    length: 8
+    charset: "alpha_lower"
+
+  email:
+    type: "template"
+    template: "{{local}}@{{domain}}"
+    parameters:
+      local:
+        type: "randomString"
+        length: 6
+        charset: "alpha_lower"
+      domain:
+        type: "choice"
+        values: ["example.com", "test.org"]
+
+  address:
+    type: "object"
+    properties:
+      street:
+        type: "template"
+        template: "{{n}} {{name}}"
+        parameters:
+          n:
+            type: "randomInt"
+            min: 1
+            max: 999
+          name:
+            type: "choice"
+            values: ["Main St", "Oak Ave"]
+      city:
+        type: "choice"
+        values: ["NYC", "LA", "Chicago"]
+      zip:
+        type: "randomInt"
+        min: 10000
+        max: 99999
+
+  tags:
+    type: "array"
+    minLength: 1
+    maxLength: 3
+    elementGenerator:
+      type: "choice"
+      values: ["a", "b", "c"]
+
+endpoints:
+  get_user:
+    path: "/api/v1/users/{user_id}"
+    method: "GET"
+    headers:
+      Accept: "application/json"
+      Authorization: "Bearer {{not_expanded}}"
+    pathParameters:
+      user_id:
+        $ref: "user_id"
+    queryParameters:
+      fields: "id,name"
+
+  create_user:
+    path: "/api/v1/users"
+    method: "POST"
+    headers:
+      Content-Type: "application/json"
+    bodyParameters:
+      type: "object"
+      properties:
+        username:
+          $ref: "username"
+        age:
+          $ref: "age"
+        email:
+          $ref: "email"
+        status:
+          $ref: "status"
+        address:
+          $ref: "address"
+        tags:
+          $ref: "tags"
+
+  graphql:
+    path: "/graphql"
+    method: "POST"
+    headers:
+      Content-Type: "application/json"
+    bodyParameters:
+      type: "object"
+      properties:
+        query:
+          type: "choice"
+          values:
+            - '{ users { id } }'
+        variables:
+          type: "object"
+          properties:
+            limit:
+              type: "randomInt"
+              min: 5
+              max: 20
+
+endpointSelection:
+  strategy: "weighted"
+  weights:
+    get_user: 0.5
+    create_user: 0.35
+    graphql: 0.15

@@ -126,7 +126,22 @@ The configuration supports three ways to specify parameter values:
 
 #### Generator Types
 
-All generator types listed below are ✅ **fully implemented** and ready to use:
+**Authoritative examples** (each file is validated by `go test ./config/...`):
+
+- [`config-examples/simple-example.yml`](config-examples/simple-example.yml) — minimal GET/POST patterns
+- [`config-examples/config-clean-example.yaml`](config-examples/config-clean-example.yaml) — `$ref`, static strings, nested bodies
+- [`config-examples/parameter-showcase.yml`](config-examples/parameter-showcase.yml) — one section per generator type
+- [`config-examples/enhanced-config.yml`](config-examples/enhanced-config.yml) — multi-endpoint, weighted selection
+- [`config-examples/advanced-example.yml`](config-examples/advanced-example.yml) — aliases (`random_int`, `params` / `fields`), nested arrays
+
+**Schema reminders**
+
+- Use **`$ref: "name"`** to reuse a named generator; a bare string like `field: "name"` is a **static** value.
+- **`parameters`** / **`properties`** are canonical; **`params`** (templates) and **`fields`** (objects) are accepted aliases.
+- **`random`** is an alias for **`randomString`**.
+- **Headers** are sent as literal strings (no `{{...}}` substitution).
+
+The following generator types are implemented:
 
 ##### `randomInt` ✅
 Generates random integers within a specified range.
@@ -169,7 +184,7 @@ Generates random strings with specified length and character set.
 ```yaml
 type: "randomString"
 length: 10
-charset: "alphanumeric"  # "alpha", "alpha_lower", "alpha_upper", "numeric", "alphanumeric", "hex"
+charset: "alphanumeric"  # alpha, alpha_lower, alpha_upper, numeric, alphanumeric, hex, alphanumeric_space
 ```
 **Output**: Random string (e.g., `"a3B7xK9mP2"`)
 
@@ -219,6 +234,44 @@ elementGenerator:
   max: 100
 ```
 **Output**: Array of values (e.g., `[42, 17, 89]`)
+
+##### `sequence` ✅
+Monotonic counter (thread-safe), optional string `format` with `{}` or `%d`.
+```yaml
+type: "sequence"
+start: 1
+increment: 1   # default 1
+format: "ORD-{}"   # omit for plain integers
+```
+
+##### `uuid` ✅
+RFC 4122 version-4 UUID string.
+```yaml
+type: "uuid"
+```
+
+##### `timestamp` ✅
+Current time in UTC. `format`: `unix` (int64 seconds), `rfc3339`, `iso8601` (same as RFC3339Nano), or default RFC3339Nano.
+```yaml
+type: "timestamp"
+format: "rfc3339"
+```
+
+##### `randomFloat` ✅
+Uniform float in `[min, max]`. Use `min` / `max` in inline maps; for **named** generators in the top-level `parameterGenerators` map, use **`minFloat`** / **`maxFloat`** if you need non-integer bounds. Optional **`precision`** (decimal places, `-1` to skip rounding).
+```yaml
+type: "randomFloat"
+min: 0.5
+max: 99.99
+precision: 2
+```
+
+##### `randomBool` ✅
+`true` with probability `probability` (0–1). Alias: **`trueProbability`** (same meaning).
+```yaml
+type: "randomBool"
+probability: 0.7
+```
 
 ### Endpoint Configuration
 
@@ -318,9 +371,9 @@ The repository includes several example configurations:
 - ✅ **`config.yaml`**: Default configuration file (copy of simple-example.yml)
 - ✅ **`config-clean-example.yaml`**: Enhanced example showcasing the new `$ref` syntax and static strings
 
-⚠️ **Note**: Some older configuration files in `config-examples/` may use outdated syntax or unsupported generator types. Use the files marked with ✅ above as reliable templates for your own configurations.
+All files in `config-examples/` are kept aligned with the current schema; `go test ./config/...` loads each of them in `TestLoadConfig_AllConfigExamples`.
 
-Each example demonstrates different aspects of the configuration system and can be used as templates for your own tests.
+Each file under `config-examples/` is kept loadable by the tool. Prefer the files above over ad-hoc copies of older snippets.
 
 ### Modes
 
@@ -366,14 +419,13 @@ Error Message Summary:
 - [ ] **Add latency percentile reporting** (p50, p90, p95, p99)
 - [ ] **Support for additional authentication schemes** (OAuth, API keys)
 - [ ] **CLI flags for overriding config values**
+- [ ] **Header / body templating** (substitute `{{name}}` from generators in headers)
 - [ ] **Real-time metrics dashboard/visualization**
 - [ ] **Export results to various formats** (JSON, CSV, HTML reports)
 - [ ] **Dockerfile for containerized runs**
-- [ ] **CI/CD integration and automated tests**
-- [ ] **Support for request dependencies and chaining**
+- [ ] **Support for request dependencies and chaining** (persistence / extractors)
 - [ ] **Custom validation rules for response content**
-- [ ] **Add sequence generator type** (incrementing numbers)
-- [ ] **Add date/time generator types**
+- [ ] **Multipart / file upload bodies**
 
 ## Contributing
 Contributions are welcome! Please open issues or submit pull requests for new features, bug fixes, or improvements.
