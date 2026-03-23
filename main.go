@@ -11,21 +11,20 @@ import (
 	"benchmarking-tool/runner"
 )
 
-func main() {
+func run(args []string) error {
 	fmt.Println("Starting benchmarking tool...")
 
-	// Get config file from command line or use default
 	configFile := "config.yaml"
-	if len(os.Args) > 1 {
-		configFile = os.Args[1]
+	if len(args) > 1 {
+		configFile = args[1]
 	}
 
 	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	fmt.Printf("Configuration loaded: Mode='%s', Duration=%ds, RPS=%d\n", 
+	fmt.Printf("Configuration loaded: Mode='%s', Duration=%ds, RPS=%d\n",
 		cfg.Execution.Mode, cfg.Execution.DurationSeconds, cfg.Execution.RequestsPerSecond)
 	fmt.Printf("Base URLs: %v\n", cfg.BaseUrls)
 	fmt.Printf("Endpoints to test: %d\n", len(cfg.Endpoints))
@@ -39,14 +38,21 @@ func main() {
 
 	_, err = benchmarkRunner.Run()
 	if err != nil {
-		log.Fatalf("Error during benchmark execution: %v", err)
+		return fmt.Errorf("error during benchmark execution: %w", err)
 	}
 
 	finalResults := metricsCollector.GetResults()
-	
+
 	// Generate report using the proper Reporter
 	rep := reporter.NewReporter()
 	rep.Generate(cfg, finalResults)
 
 	fmt.Println("Benchmarking tool finished.")
+	return nil
+}
+
+func main() {
+	if err := run(os.Args); err != nil {
+		log.Fatalf("Application error: %v", err)
+	}
 }

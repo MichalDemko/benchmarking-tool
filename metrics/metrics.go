@@ -18,8 +18,8 @@ type MetricDetail struct {
 
 // Collector stores benchmark metrics
 type Collector struct {
-	mutex         sync.Mutex
-	allRequests   []MetricDetail // Stores all individual request details
+	mutex       sync.Mutex
+	allRequests []MetricDetail // Stores all individual request details
 }
 
 // NewCollector creates a new metrics collector
@@ -45,8 +45,10 @@ func (c *Collector) RecordRequest(url string, method string, statusCode int, dur
 	})
 }
 
-// AppendDetail appends a MetricDetail to the collector (called from a single goroutine)
+// AppendDetail appends a MetricDetail to the collector (thread-safe).
 func (c *Collector) AppendDetail(detail MetricDetail) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	c.allRequests = append(c.allRequests, detail)
 }
 
@@ -60,8 +62,8 @@ type AggregatedResults struct {
 	AvgDuration        time.Duration
 	MinDuration        time.Duration
 	MaxDuration        time.Duration
-	StatusCodesCount   map[int]int64 // Counts per status code
-	ErrorDetails       map[string]int  // Count of specific error messages
+	StatusCodesCount   map[int]int64  // Counts per status code
+	ErrorDetails       map[string]int // Count of specific error messages
 	// TODO: Add latencies (p50, p90, p95, p99)
 	// TODO: Add RPS achieved
 }

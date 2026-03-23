@@ -2,7 +2,7 @@
 
 # Variables
 BINARY_NAME=benchmarking-tool.out
-CONFIG_FILE ?= config-examples/advanced-example.yml
+CONFIG_FILE ?= config-examples/simple-example.yml
 
 # Default target
 .DEFAULT_GOAL := help
@@ -17,7 +17,7 @@ build:
 # Run the application
 run: build
 	@echo "Running the application with config: $(CONFIG_FILE)"
-	./$(BINARY_NAME) run $(CONFIG_FILE)
+	./$(BINARY_NAME) $(CONFIG_FILE)
 
 # Run tests
 test:

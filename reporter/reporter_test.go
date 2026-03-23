@@ -31,8 +31,8 @@ func TestReporter_Generate(t *testing.T) {
 			name: "Standard report",
 			cfg: &config.Config{
 				Execution: config.ExecutionConfig{
-					Mode:             "fixed",
-					DurationSeconds:  60,
+					Mode:              "fixed",
+					DurationSeconds:   60,
 					RequestsPerSecond: 100,
 				},
 			},

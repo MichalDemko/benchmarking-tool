@@ -4,59 +4,55 @@ import (
 	"benchmarking-tool/config"
 	"benchmarking-tool/metrics"
 	"fmt"
+	"io"
 	"os"
 	"sort"
-	"text/tabwriter"
-	// "time"
 )
 
 // Reporter generates and displays benchmark reports
-type Reporter struct {
-}
+type Reporter struct{}
 
-// NewReporter creates a new reporter
+// NewReporter creates a new Reporter
 func NewReporter() *Reporter {
 	return &Reporter{}
 }
 
+const metricLabelWidth = 22 // fits "Configured Duration", "Successful Requests"
+
+func writeMetricRow(w io.Writer, label, value string) {
+	fmt.Fprintf(w, "%-*s  %s\n", metricLabelWidth, label, value)
+}
+
 // Generate creates a report from benchmark results and metrics data
 func (r *Reporter) Generate(cfg *config.Config, results metrics.AggregatedResults) {
-	fmt.Println("\n--- Benchmark Report ---")
+	out := os.Stdout
 
-	// Example using tabwriter for formatted output
-	const padding = 3
-	writer := tabwriter.NewWriter(os.Stdout, 0, 0, padding, ' ', tabwriter.AlignRight|tabwriter.Debug)
-	defer writer.Flush()
+	fmt.Fprintln(out, "\n--- Benchmark Report ---")
 
-	fmt.Fprintf(writer, "Metric\tValue\n")
-	fmt.Fprintf(writer, "------\t-----\n")
+	writeMetricRow(out, "Metric", "Value")
+	writeMetricRow(out, "------", "-----")
 
-	fmt.Fprintf(writer, "Test Mode\t%s\n", cfg.Execution.Mode)
-	fmt.Fprintf(writer, "Configured Duration\t%ds\n", cfg.Execution.DurationSeconds)
+	writeMetricRow(out, "Test Mode", cfg.Execution.Mode)
+	writeMetricRow(out, "Configured Duration", fmt.Sprintf("%ds", cfg.Execution.DurationSeconds))
 	if cfg.Execution.Mode == "fixed" {
-		fmt.Fprintf(writer, "Configured RPS\t%d\n", cfg.Execution.RequestsPerSecond)
+		writeMetricRow(out, "Configured RPS", fmt.Sprintf("%d", cfg.Execution.RequestsPerSecond))
 	}
 
-	fmt.Fprintf(writer, "Total Requests\t%d\n", results.TotalRequests)
-	fmt.Fprintf(writer, "Successful Requests\t%d\n", results.SuccessfulRequests)
-	fmt.Fprintf(writer, "Failed Requests\t%d\n", results.FailedRequests)
+	writeMetricRow(out, "Total Requests", fmt.Sprintf("%d", results.TotalRequests))
+	writeMetricRow(out, "Successful Requests", fmt.Sprintf("%d", results.SuccessfulRequests))
+	writeMetricRow(out, "Failed Requests", fmt.Sprintf("%d", results.FailedRequests))
 
 	if results.TotalRequests > 0 {
 		errorRate := float64(results.FailedRequests) / float64(results.TotalRequests) * 100
-		fmt.Fprintf(writer, "Error Rate\t%.2f%%\n", errorRate)
+		writeMetricRow(out, "Error Rate", fmt.Sprintf("%.2f%%", errorRate))
 	}
 
-	fmt.Fprintf(writer, "Min Request Time\t%s\n", results.MinDuration)
-	fmt.Fprintf(writer, "Max Request Time\t%s\n", results.MaxDuration)
-	fmt.Fprintf(writer, "Avg Request Time\t%s\n", results.AvgDuration)
+	writeMetricRow(out, "Min Request Time", results.MinDuration.String())
+	writeMetricRow(out, "Max Request Time", results.MaxDuration.String())
+	writeMetricRow(out, "Avg Request Time", results.AvgDuration.String())
 
-	// TODO: Calculate and display actual RPS achieved based on timestamps in MetricDetail
-	// This would involve looking at the timestamps of requests in metrics.AllRequests
-	// and calculating requests per second over the actual run duration.
-	// For now, we can state the target RPS for fixed mode.
+	fmt.Fprintln(out, "\nStatus Code Distribution:")
 
-	fmt.Println("\nStatus Code Distribution:")
-	// Sort status codes for consistent output
 	var statusKeys []int
 	for code := range results.StatusCodesCount {
 		statusKeys = append(statusKeys, code)
@@ -64,13 +60,12 @@ func (r *Reporter) Generate(cfg *config.Config, results metrics.AggregatedResult
 	sort.Ints(statusKeys)
 
 	for _, code := range statusKeys {
-		fmt.Fprintf(writer, "  Status %d\t%d\n", code, results.StatusCodesCount[code])
+		label := fmt.Sprintf("Status %d", code)
+		writeMetricRow(out, label, fmt.Sprintf("%d", results.StatusCodesCount[code]))
 	}
-	writer.Flush() // Flush before printing next section
 
 	if len(results.ErrorDetails) > 0 {
-		fmt.Println("\nError Message Summary:")
-		// Sort error messages for consistent output
+		fmt.Fprintln(out, "\nError Message Summary:")
 		var errorKeys []string
 		for msg := range results.ErrorDetails {
 			errorKeys = append(errorKeys, msg)
@@ -78,14 +73,10 @@ func (r *Reporter) Generate(cfg *config.Config, results metrics.AggregatedResult
 		sort.Strings(errorKeys)
 
 		for _, msg := range errorKeys {
-			fmt.Fprintf(writer, "  '%s'\t%d times\n", msg, results.ErrorDetails[msg])
+			label := fmt.Sprintf("'%s'", msg)
+			writeMetricRow(out, label, fmt.Sprintf("%d times", results.ErrorDetails[msg]))
 		}
-		writer.Flush()
 	}
 
-	// TODO: Add latency percentile reporting (p50, p90, p95, p99)
-	// This would require sorting all request durations from metrics.AllRequests
-	// and then picking values at specific percentiles.
-
-	fmt.Println("\n--- End of Report ---")
+	fmt.Fprintln(out, "\n--- End of Report ---")
 }

@@ -27,5 +27,3 @@ go.work
 yarn.lock
 package-lock.json
 
-# Config files
-config.yaml

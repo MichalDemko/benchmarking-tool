@@ -3,45 +3,46 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v2"
 )
 
 // ExecutionConfig defines how the benchmark should run
 type ExecutionConfig struct {
-	Mode               string `yaml:"mode"`               // "fixed" or "ramp"
-	DurationSeconds    int    `yaml:"durationSeconds"`    // Total duration for the test
-	RequestTimeoutMs   int    `yaml:"requestTimeoutMs"`   // Timeout for individual HTTP requests
-	RequestsPerSecond  int    `yaml:"requestsPerSecond"`  // RPS for fixed mode
+	Mode              string `yaml:"mode"`              // "fixed" or "ramp"
+	DurationSeconds   int    `yaml:"durationSeconds"`   // Total duration for the test
+	RequestTimeoutMs  int    `yaml:"requestTimeoutMs"`  // Timeout for individual HTTP requests
+	RequestsPerSecond int    `yaml:"requestsPerSecond"` // RPS for fixed mode
 }
 
 // ParameterGenerator defines how to generate parameter values
 type ParameterGenerator struct {
-	Type        string        `yaml:"type"`                  // "randomInt", "choice", "static", "randomString", "template", "object", "array"
-	Min         *int          `yaml:"min,omitempty"`         // For randomInt
-	Max         *int          `yaml:"max,omitempty"`         // For randomInt
-	Format      string        `yaml:"format,omitempty"`      // Format string with {} placeholder
-	Values      []any         `yaml:"values,omitempty"`      // For choice type
-	Weights     []float64     `yaml:"weights,omitempty"`     // For weighted choice
-	Value       any           `yaml:"value,omitempty"`       // For static type
-	Length      *int          `yaml:"length,omitempty"`      // For randomString
-	Charset     string        `yaml:"charset,omitempty"`     // For randomString
-	Template    string        `yaml:"template,omitempty"`    // For template type
-	Parameters  map[string]any `yaml:"parameters,omitempty"` // For template type
-	Properties  map[string]any `yaml:"properties,omitempty"` // For object type
-	MinLength   *int          `yaml:"minLength,omitempty"`   // For array type
-	MaxLength   *int          `yaml:"maxLength,omitempty"`   // For array type
-	ElementGenerator any      `yaml:"elementGenerator,omitempty"` // For array type
+	Type             string         `yaml:"type"`                       // "randomInt", "choice", "static", "randomString", "template", "object", "array"
+	Min              *int           `yaml:"min,omitempty"`              // For randomInt
+	Max              *int           `yaml:"max,omitempty"`              // For randomInt
+	Format           string         `yaml:"format,omitempty"`           // Format string with {} placeholder
+	Values           []any          `yaml:"values,omitempty"`           // For choice type
+	Weights          []float64      `yaml:"weights,omitempty"`          // For weighted choice
+	Value            any            `yaml:"value,omitempty"`            // For static type
+	Length           *int           `yaml:"length,omitempty"`           // For randomString
+	Charset          string         `yaml:"charset,omitempty"`          // For randomString
+	Template         string         `yaml:"template,omitempty"`         // For template type
+	Parameters       map[string]any `yaml:"parameters,omitempty"`       // For template type
+	Properties       map[string]any `yaml:"properties,omitempty"`       // For object type
+	MinLength        *int           `yaml:"minLength,omitempty"`        // For array type
+	MaxLength        *int           `yaml:"maxLength,omitempty"`        // For array type
+	ElementGenerator any            `yaml:"elementGenerator,omitempty"` // For array type
 }
 
 // EndpointConfig defines a single API endpoint configuration
 type EndpointConfig struct {
-	Path            string                 `yaml:"path"`
-	Method          string                 `yaml:"method"`
-	Headers         map[string]string      `yaml:"headers,omitempty"`
-	PathParameters  map[string]any         `yaml:"pathParameters,omitempty"`
-	QueryParameters map[string]any         `yaml:"queryParameters,omitempty"`
-	BodyParameters  any                    `yaml:"bodyParameters,omitempty"`
+	Path            string            `yaml:"path"`
+	Method          string            `yaml:"method"`
+	Headers         map[string]string `yaml:"headers,omitempty"`
+	PathParameters  map[string]any    `yaml:"pathParameters,omitempty"`
+	QueryParameters map[string]any    `yaml:"queryParameters,omitempty"`
+	BodyParameters  any               `yaml:"bodyParameters,omitempty"`
 }
 
 // EndpointSelectionConfig defines how endpoints are selected
@@ -52,12 +53,12 @@ type EndpointSelectionConfig struct {
 
 // Config holds the complete configuration
 type Config struct {
-	BaseUrls            []string                        `yaml:"baseUrls"`
-	Execution           ExecutionConfig                 `yaml:"execution"`
-	ParameterGenerators map[string]ParameterGenerator   `yaml:"parameterGenerators"`
-	Endpoints           map[string]EndpointConfig       `yaml:"endpoints"`
-	EndpointSelection   EndpointSelectionConfig         `yaml:"endpointSelection"`
-	engine              *ParameterEngine                // Internal engine for parameter generation
+	BaseUrls            []string                      `yaml:"baseUrls"`
+	Execution           ExecutionConfig               `yaml:"execution"`
+	ParameterGenerators map[string]ParameterGenerator `yaml:"parameterGenerators"`
+	Endpoints           map[string]EndpointConfig     `yaml:"endpoints"`
+	EndpointSelection   EndpointSelectionConfig       `yaml:"endpointSelection"`
+	engine              *ParameterEngine              // Internal engine for parameter generation
 }
 
 // LoadConfig loads configuration from a YAML file
@@ -95,7 +96,7 @@ func LoadConfig(filePath string) (*Config, error) {
 
 	// Initialize parameter engine
 	cfg.engine = NewParameterEngine()
-	
+
 	// Register named generators for simple references
 	for name, genDef := range cfg.ParameterGenerators {
 		gen, err := cfg.createGeneratorFromDef(genDef)
@@ -104,8 +105,55 @@ func LoadConfig(filePath string) (*Config, error) {
 		}
 		cfg.engine.RegisterGenerator(name, gen)
 	}
-	
+
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
+}
+
+// Validate checks configuration after defaults and generator registration.
+func (c *Config) Validate() error {
+	if len(c.BaseUrls) == 0 {
+		return fmt.Errorf("baseUrls must not be empty")
+	}
+	if len(c.Endpoints) == 0 {
+		return fmt.Errorf("endpoints must not be empty")
+	}
+	switch strings.ToLower(c.Execution.Mode) {
+	case "fixed":
+		if c.Execution.RequestsPerSecond <= 0 {
+			return fmt.Errorf("requestsPerSecond must be positive for fixed mode")
+		}
+	case "ramp":
+		return fmt.Errorf("execution.mode %q is not implemented yet", c.Execution.Mode)
+	default:
+		return fmt.Errorf("unknown execution.mode %q", c.Execution.Mode)
+	}
+	if c.Execution.DurationSeconds <= 0 {
+		return fmt.Errorf("durationSeconds must be positive")
+	}
+	if c.Execution.RequestTimeoutMs <= 0 {
+		return fmt.Errorf("requestTimeoutMs must be positive")
+	}
+	strat := strings.ToLower(c.EndpointSelection.Strategy)
+	switch strat {
+	case "weighted", "roundrobin", "random":
+	default:
+		return fmt.Errorf("unknown endpointSelection.strategy %q", c.EndpointSelection.Strategy)
+	}
+	if strat == "weighted" {
+		for ep, w := range c.EndpointSelection.Weights {
+			if _, ok := c.Endpoints[ep]; !ok {
+				return fmt.Errorf("endpointSelection.weights: unknown endpoint %q", ep)
+			}
+			if w < 0 {
+				return fmt.Errorf("endpointSelection.weights %q: weight must be non-negative", ep)
+			}
+		}
+	}
+	return nil
 }
 
 // GetParameterGenerator retrieves a parameter generator by name or creates one from inline definition
@@ -118,7 +166,7 @@ func (cfg *Config) createGeneratorFromDef(genDef ParameterGenerator) (Generator,
 	// Convert ParameterGenerator struct to a map for the engine
 	defMap := make(map[string]any)
 	defMap["type"] = genDef.Type
-	
+
 	if genDef.Min != nil {
 		defMap["min"] = *genDef.Min
 	}
@@ -161,6 +209,6 @@ func (cfg *Config) createGeneratorFromDef(genDef ParameterGenerator) (Generator,
 	if genDef.ElementGenerator != nil {
 		defMap["elementGenerator"] = genDef.ElementGenerator
 	}
-	
+
 	return cfg.engine.createGeneratorWithConfig(defMap, cfg)
 }

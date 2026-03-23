@@ -22,62 +22,62 @@ func TestNewCollector(t *testing.T) {
 
 func TestCollector_RecordRequest(t *testing.T) {
 	testCases := []struct {
-		name                 string
-		url                  string
-		method               string
-		statusCode           int
-		duration             time.Duration
-		isError              bool
-		errorMsg             string
-		expectedTotal        int64
-		expectedSuccessful   int64
-		expectedFailed       int64
-		expectedStatusCount  int64
-		expectedErrorCount   int
-		expectedAvgDuration  time.Duration
+		name                string
+		url                 string
+		method              string
+		statusCode          int
+		duration            time.Duration
+		isError             bool
+		errorMsg            string
+		expectedTotal       int64
+		expectedSuccessful  int64
+		expectedFailed      int64
+		expectedStatusCount int64
+		expectedErrorCount  int
+		expectedAvgDuration time.Duration
 	}{
 		{
-			name:                 "Successful request",
-			url:                  "https://api.example.com/test",
-			method:               "GET",
-			statusCode:           200,
-			duration:             100 * time.Millisecond,
-			isError:              false,
-			errorMsg:             "",
-			expectedTotal:        1,
-			expectedSuccessful:   1,
-			expectedFailed:       0,
-			expectedStatusCount:  1,
-			expectedAvgDuration:  100 * time.Millisecond,
+			name:                "Successful request",
+			url:                 "https://api.example.com/test",
+			method:              "GET",
+			statusCode:          200,
+			duration:            100 * time.Millisecond,
+			isError:             false,
+			errorMsg:            "",
+			expectedTotal:       1,
+			expectedSuccessful:  1,
+			expectedFailed:      0,
+			expectedStatusCount: 1,
+			expectedAvgDuration: 100 * time.Millisecond,
 		},
 		{
-			name:                 "Request with network error",
-			url:                  "https://api.example.com/test",
-			method:               "GET",
-			statusCode:           0,
-			duration:             5 * time.Second,
-			isError:              true,
-			errorMsg:             "connection timeout",
-			expectedTotal:        1,
-			expectedSuccessful:   0,
-			expectedFailed:       1,
-			expectedStatusCount:  1,
-			expectedErrorCount:   1,
-			expectedAvgDuration:  5 * time.Second,
+			name:                "Request with network error",
+			url:                 "https://api.example.com/test",
+			method:              "GET",
+			statusCode:          0,
+			duration:            5 * time.Second,
+			isError:             true,
+			errorMsg:            "connection timeout",
+			expectedTotal:       1,
+			expectedSuccessful:  0,
+			expectedFailed:      1,
+			expectedStatusCount: 1,
+			expectedErrorCount:  1,
+			expectedAvgDuration: 5 * time.Second,
 		},
 		{
-			name:                 "Request with HTTP error status",
-			url:                  "https://api.example.com/notfound",
-			method:               "GET",
-			statusCode:           404,
-			duration:             50 * time.Millisecond,
-			isError:              false,
-			errorMsg:             "",
-			expectedTotal:        1,
-			expectedSuccessful:   0,
-			expectedFailed:       1,
-			expectedStatusCount:  1,
-			expectedAvgDuration:  50 * time.Millisecond,
+			name:                "Request with HTTP error status",
+			url:                 "https://api.example.com/notfound",
+			method:              "GET",
+			statusCode:          404,
+			duration:            50 * time.Millisecond,
+			isError:             false,
+			errorMsg:            "",
+			expectedTotal:       1,
+			expectedSuccessful:  0,
+			expectedFailed:      1,
+			expectedStatusCount: 1,
+			expectedAvgDuration: 50 * time.Millisecond,
 		},
 	}
 

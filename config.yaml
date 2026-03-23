@@ -1,53 +1,47 @@
-# Simplified Enhanced Configuration Example
-# Focus on the most important new features
+# Default local config — copy of config-examples/simple-example.yml
+# Run: ./benchmarking-tool   (uses this file) or ./benchmarking-tool path/to/config.yml
 
 baseUrls:
   - "http://0.0.0.0:8080"
 
 execution:
   mode: "fixed"
-  durationSeconds: 5 # Omit or use 0 for default 60s (see config.LoadConfig)
-  requestTimeoutMs: 2000 # Timeout for individual HTTP requests in milliseconds
+  durationSeconds: 5
+  requestTimeoutMs: 2000
   requestsPerSecond: 50
 
-# Core parameter generators
 parameterGenerators:
   user_id:
-    type: "formattedInt"  # Explicitly use formattedInt for string output
+    type: "formattedInt"
     min: 1000
     max: 9999
-    format: "user_{}"  # Results in user_1234, user_5678, etc.
-  
+    format: "user_{}"
+
   age:
-    type: "randomInt"  # Use randomInt for plain integer output
+    type: "randomInt"
     min: 18
     max: 65
-  
+
   status:
     type: "choice"
     values: ["active", "inactive"]
     weights: [0.8, 0.2]
 
 endpoints:
-  # GET with path and query parameters
   get_user:
     path: "/api/v1/users/{user_id}"
     method: "GET"
-    
     pathParameters:
       user_id:
         $ref: "user_id"
-    
     queryParameters:
-      fields: "id,name,email"  # Static string
+      fields: "id,name,email"
 
-  # POST with body parameters - search/filter endpoint
   search_users:
     path: "/api/v1/users/search"
     method: "POST"
     headers:
       Content-Type: "application/json"
-    
     bodyParameters:
       type: "object"
       properties:
@@ -62,11 +56,11 @@ endpoints:
             minAge:
               $ref: "age"
             maxAge:
-              type: "randomInt"  # Plain integer for age value
+              type: "randomInt"
               min: 65
               max: 80
         limit:
-          type: "randomInt"  # Plain integer for limit value
+          type: "randomInt"
           min: 10
           max: 100
 

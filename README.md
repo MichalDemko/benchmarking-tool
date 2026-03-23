@@ -17,7 +17,7 @@ A flexible HTTP benchmarking tool for load testing APIs with support for multipl
 ## Getting Started
 
 ### Prerequisites
-- Go 1.22 or newer
+- Go 1.24.2 or newer (see `go.mod`)
 
 ### Quick Start
 1. Clone and build:
@@ -28,8 +28,9 @@ A flexible HTTP benchmarking tool for load testing APIs with support for multipl
    go build -o benchmarking-tool
    ```
 
-2. Run with the included example:
+2. Run with the included example or the root `config.yaml` default:
    ```sh
+   ./benchmarking-tool                          # uses config.yaml when present
    ./benchmarking-tool config-examples/simple-example.yml
    ```
 
