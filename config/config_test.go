@@ -45,6 +45,50 @@ func TestValidate_UnknownStrategy(t *testing.T) {
 	}
 }
 
+func TestValidate_MaxWorkersOutOfRange(t *testing.T) {
+	c := minimalValidConfig()
+	c.Execution.MaxWorkers = maxWorkersCap + 1
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "maxWorkers") {
+		t.Fatalf("expected maxWorkers error, got %v", err)
+	}
+}
+
+func TestValidate_MaxQueueDepthOutOfRange(t *testing.T) {
+	c := minimalValidConfig()
+	c.Execution.MaxQueueDepth = maxQueueDepthCap + 1
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "maxQueueDepth") {
+		t.Fatalf("expected maxQueueDepth error, got %v", err)
+	}
+}
+
+func TestValidate_RateBurstOutOfRange(t *testing.T) {
+	c := minimalValidConfig()
+	c.Execution.RateBurst = maxRateBurstCap + 1
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "rateBurst") {
+		t.Fatalf("expected rateBurst error, got %v", err)
+	}
+}
+
+func TestApplyExecutionDefaults_AutoMaxWorkers(t *testing.T) {
+	c := minimalValidConfig()
+	c.Execution.RequestsPerSecond = 500
+	c.Execution.MaxWorkers = 0
+	c.Execution.MaxQueueDepth = 0
+	c.Execution.RateBurst = 0
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if c.Execution.MaxWorkers != 256 {
+		t.Fatalf("expected auto maxWorkers 256, got %d", c.Execution.MaxWorkers)
+	}
+	if c.Execution.MaxQueueDepth != 2*256 {
+		t.Fatalf("expected default queue 512, got %d", c.Execution.MaxQueueDepth)
+	}
+	if c.Execution.RateBurst != 1 {
+		t.Fatalf("expected default burst 1, got %d", c.Execution.RateBurst)
+	}
+}
+
 func TestLoadConfig_TemplateWithStringKeyedParameters(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cfg.yaml")

@@ -8,12 +8,24 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+const (
+	maxWorkersCap    = 8192
+	maxQueueDepthCap = 1_000_000
+	maxRateBurstCap  = 10_000
+)
+
 // ExecutionConfig defines how the benchmark should run
 type ExecutionConfig struct {
 	Mode              string `yaml:"mode"`              // "fixed" or "ramp"
 	DurationSeconds   int    `yaml:"durationSeconds"`   // Total duration for the test
 	RequestTimeoutMs  int    `yaml:"requestTimeoutMs"`  // Timeout for individual HTTP requests
 	RequestsPerSecond int    `yaml:"requestsPerSecond"` // RPS for fixed mode
+	// MaxWorkers caps concurrent HTTP request goroutines. 0 after load means auto: min(256, max(1, RPS)).
+	MaxWorkers int `yaml:"maxWorkers,omitempty"`
+	// MaxQueueDepth is the buffered job queue between the rate scheduler and workers. 0 means 2*MaxWorkers.
+	MaxQueueDepth int `yaml:"maxQueueDepth,omitempty"`
+	// RateBurst is the token-bucket burst for golang.org/x/time/rate (default 1).
+	RateBurst int `yaml:"rateBurst,omitempty"`
 }
 
 // ParameterGenerator defines how to generate parameter values
@@ -85,19 +97,6 @@ func LoadConfig(filePath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config data from '%s': %w", filePath, err)
 	}
 
-	// Set defaults
-	if cfg.Execution.RequestTimeoutMs == 0 {
-		cfg.Execution.RequestTimeoutMs = 5000
-	}
-	if cfg.Execution.Mode == "" {
-		cfg.Execution.Mode = "fixed"
-	}
-	if cfg.Execution.DurationSeconds == 0 {
-		cfg.Execution.DurationSeconds = 60
-	}
-	if cfg.Execution.RequestsPerSecond == 0 {
-		cfg.Execution.RequestsPerSecond = 10
-	}
 	if cfg.EndpointSelection.Strategy == "" {
 		cfg.EndpointSelection.Strategy = "roundRobin"
 	}
@@ -121,8 +120,41 @@ func LoadConfig(filePath string) (*Config, error) {
 	return &cfg, nil
 }
 
+func (c *Config) applyExecutionDefaults() {
+	if c.Execution.RequestTimeoutMs == 0 {
+		c.Execution.RequestTimeoutMs = 5000
+	}
+	if c.Execution.Mode == "" {
+		c.Execution.Mode = "fixed"
+	}
+	if c.Execution.DurationSeconds == 0 {
+		c.Execution.DurationSeconds = 60
+	}
+	if c.Execution.RequestsPerSecond == 0 {
+		c.Execution.RequestsPerSecond = 10
+	}
+	if c.Execution.MaxWorkers == 0 {
+		rps := c.Execution.RequestsPerSecond
+		if rps < 1 {
+			rps = 1
+		}
+		if rps > 256 {
+			c.Execution.MaxWorkers = 256
+		} else {
+			c.Execution.MaxWorkers = rps
+		}
+	}
+	if c.Execution.MaxQueueDepth == 0 {
+		c.Execution.MaxQueueDepth = 2 * c.Execution.MaxWorkers
+	}
+	if c.Execution.RateBurst == 0 {
+		c.Execution.RateBurst = 1
+	}
+}
+
 // Validate checks configuration after defaults and generator registration.
 func (c *Config) Validate() error {
+	c.applyExecutionDefaults()
 	if len(c.BaseUrls) == 0 {
 		return fmt.Errorf("baseUrls must not be empty")
 	}
@@ -144,6 +176,15 @@ func (c *Config) Validate() error {
 	}
 	if c.Execution.RequestTimeoutMs <= 0 {
 		return fmt.Errorf("requestTimeoutMs must be positive")
+	}
+	if c.Execution.MaxWorkers < 1 || c.Execution.MaxWorkers > maxWorkersCap {
+		return fmt.Errorf("execution.maxWorkers must be between 1 and %d", maxWorkersCap)
+	}
+	if c.Execution.MaxQueueDepth < 0 || c.Execution.MaxQueueDepth > maxQueueDepthCap {
+		return fmt.Errorf("execution.maxQueueDepth must be between 0 and %d", maxQueueDepthCap)
+	}
+	if c.Execution.RateBurst < 1 || c.Execution.RateBurst > maxRateBurstCap {
+		return fmt.Errorf("execution.rateBurst must be between 1 and %d", maxRateBurstCap)
 	}
 	strat := strings.ToLower(c.EndpointSelection.Strategy)
 	switch strat {

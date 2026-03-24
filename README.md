@@ -8,7 +8,7 @@ A flexible HTTP benchmarking tool for load testing APIs with support for multipl
 - ✅ **Support for path parameters, query parameters, and request bodies**
 - ✅ **Dynamic parameter value generation** (random integers, formatted strings, choices, etc.)
 - ✅ **Flexible endpoint selection strategies** (round-robin, weighted, random)
-- ✅ **Fixed RPS load generation mode**
+- ✅ **Fixed RPS load generation** with a bounded worker pool, optional queue depth, and token-bucket burst
 - ✅ **Configurable test duration and request timeouts**
 - ✅ **YAML-based configuration** for easy setup
 - ✅ **Comprehensive metrics collection and detailed reporting**
@@ -58,7 +58,11 @@ execution:
   mode: "fixed"                # Only "fixed" mode is currently supported
   durationSeconds: 60          # Test duration in seconds
   requestTimeoutMs: 5000       # Individual request timeout in milliseconds
-  requestsPerSecond: 50        # Target requests per second
+  requestsPerSecond: 50        # Target average requests per second
+  # Optional — concurrency and rate shaping (see "Fixed RPS: workers and queue" below)
+  # maxWorkers: 16             # Cap concurrent in-flight HTTP requests (default: auto)
+  # maxQueueDepth: 32          # Buffered jobs between scheduler and workers (default: 2 × maxWorkers)
+  # rateBurst: 1               # Token-bucket burst for the rate limiter (default: 1)
 
 # Named parameter generators (reusable across endpoints)
 parameterGenerators:
@@ -92,6 +96,20 @@ endpointSelection:
     get_user: 0.6
     create_user: 0.4
 ```
+
+### Fixed RPS: workers and queue
+
+Fixed mode targets an **average** `requestsPerSecond` using a token bucket (`golang.org/x/time/rate`). A **scheduler** acquires tokens at that rate and pushes work to a **bounded queue**; **worker goroutines** (up to `maxWorkers`) dequeue work, build each request, and execute it with a shared `http.Client`. The HTTP transport’s idle connection limits scale with `maxWorkers` so many concurrent requests to the same host are not artificially serialized.
+
+| Field | Meaning |
+| ----- | ------- |
+| `maxWorkers` | Maximum number of requests executing at once. If omitted or `0`, it defaults to `min(256, max(1, requestsPerSecond))`. Allowed range after resolution: **1–8192**. |
+| `maxQueueDepth` | How many scheduled requests may wait for a free worker. If omitted or `0`, it defaults to **2 × maxWorkers**. Maximum **1_000_000**. |
+| `rateBurst` | Burst size for the limiter (how many permits can accumulate). Default **1** if omitted or `0`. Allowed range: **1–10_000**. |
+
+**When workers cannot keep up** (slow server, low `maxWorkers`, or a small queue), the scheduler **does not block indefinitely**: if the queue is full, that scheduling slot is **dropped** and counted. The run log includes a line with the total **dropped** count when any drops occurred. Completed requests are still recorded in metrics as today; dropped slots never become HTTP attempts.
+
+For a small local example including these fields, see [`test_config.yaml`](test_config.yaml).
 
 ### Parameter Generators
 
@@ -351,13 +369,16 @@ endpointSelection:
 ### Execution Modes
 
 #### Fixed Mode ✅ **Implemented**
-Maintains a constant request rate throughout the test duration.
+Targets an average request rate over the test duration using a rate limiter, with bounded concurrency (`maxWorkers`) and an optional job queue (`maxQueueDepth`). See [Fixed RPS: workers and queue](#fixed-rps-workers-and-queue) for defaults and backpressure behavior.
 ```yaml
 execution:
   mode: "fixed"
   durationSeconds: 300         # Run for 5 minutes
-  requestsPerSecond: 100       # Constant 100 RPS
+  requestsPerSecond: 100       # Target average 100 RPS
   requestTimeoutMs: 2000       # 2 second timeout per request
+  maxWorkers: 32               # Optional; omit for auto
+  maxQueueDepth: 64            # Optional; omit for 2 × maxWorkers
+  rateBurst: 1                 # Optional; default 1
 ```
 
 #### Ramp Mode 🚧 **Future Feature**
@@ -378,7 +399,7 @@ Each file under `config-examples/` is kept loadable by the tool. Prefer the file
 ### Modes
 
 #### fixed ✅ **Implemented**
-Sends a fixed number of requests per second (RPS) to the defined endpoints. Endpoints are selected based on the configured strategy (round-robin, weighted, or random). This mode is fully implemented and recommended for most load testing scenarios.
+Targets a configured average RPS across endpoints (round-robin, weighted, or random selection). Concurrency is capped by `maxWorkers`, with a bounded queue between the rate scheduler and workers; if the queue fills, excess schedule slots are dropped and summarized in the log. This mode is recommended for most load testing scenarios.
 
 ## Output and Reporting
 
@@ -388,7 +409,9 @@ The tool provides comprehensive reporting including:
 - Error rate percentage
 - Status code distribution
 - Detailed error message summary with occurrence counts
-- Execution duration and actual RPS achieved
+- Execution duration and configured RPS (metrics reflect **completed** HTTP attempts only)
+
+During a fixed-RPS run, the runner also logs worker count, queue depth, and burst at start. If any scheduled requests were dropped because the job queue was full, a log line reports how many were dropped (those slots are not counted in the benchmark report totals).
 
 Example output:
 ```

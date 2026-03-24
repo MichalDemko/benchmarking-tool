@@ -16,7 +16,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // Runner executes the benchmark tests with the new configuration format
@@ -25,19 +28,19 @@ type Runner struct {
 	collector     *metrics.Collector
 	client        *http.Client
 	endpointNames []string // sorted keys of cfg.Endpoints (stable round-robin / weighted)
-	endpointIdx   uint64
-	urlIdx        uint64
+	endpointIdx   atomic.Uint64
+	urlIdx        atomic.Uint64
 	resultsCh     chan metrics.MetricDetail
-	mu            sync.Mutex
 }
 
 // BenchmarkResult holds the outcome of a benchmark run
 type BenchmarkResult struct {
-	TotalRequestsMade  int64
-	SuccessfulRequests int64
-	FailedRequests     int64
-	RequestTimings     []time.Duration
-	StatusCodes        map[int]int64
+	TotalRequestsMade        int64
+	SuccessfulRequests       int64
+	FailedRequests           int64
+	DroppedDueToBackpressure int64
+	RequestTimings           []time.Duration
+	StatusCodes              map[int]int64
 }
 
 // NewRunner creates a new benchmark runner
@@ -50,16 +53,30 @@ func NewRunner(cfg *config.Config, collector *metrics.Collector) *Runner {
 	}
 	sort.Strings(epNames)
 
+	mw := cfg.Execution.MaxWorkers
+	if mw < 1 {
+		mw = 1
+	}
+	nHosts := len(cfg.BaseUrls)
+	if nHosts < 1 {
+		nHosts = 1
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.MaxIdleConnsPerHost = mw
+	tr.MaxIdleConns = mw * nHosts
+	if tr.MaxIdleConns < mw {
+		tr.MaxIdleConns = mw
+	}
+
 	return &Runner{
 		cfg:           cfg,
 		collector:     collector,
 		endpointNames: epNames,
 		client: &http.Client{
-			Timeout: requestTimeout,
+			Timeout:   requestTimeout,
+			Transport: tr,
 		},
-		endpointIdx: 0,
-		urlIdx:      0,
-		resultsCh:   make(chan metrics.MetricDetail, 1000),
+		resultsCh: make(chan metrics.MetricDetail, 1000),
 	}
 }
 
@@ -79,8 +96,9 @@ func (r *Runner) Run() (*BenchmarkResult, error) {
 
 // runFixedRPSMode executes the benchmark at a fixed number of requests per second
 func (r *Runner) runFixedRPSMode() (*BenchmarkResult, error) {
-	log.Printf("Running in fixed RPS mode: %d RPS for %d seconds.",
-		r.cfg.Execution.RequestsPerSecond, r.cfg.Execution.DurationSeconds)
+	log.Printf("Running in fixed RPS mode: %d RPS for %d seconds (workers=%d, queue=%d, burst=%d).",
+		r.cfg.Execution.RequestsPerSecond, r.cfg.Execution.DurationSeconds,
+		r.cfg.Execution.MaxWorkers, r.cfg.Execution.MaxQueueDepth, r.cfg.Execution.RateBurst)
 
 	if r.cfg.Execution.RequestsPerSecond <= 0 {
 		return nil, fmt.Errorf("requestsPerSecond must be positive for fixed mode")
@@ -92,15 +110,15 @@ func (r *Runner) runFixedRPSMode() (*BenchmarkResult, error) {
 		return nil, fmt.Errorf("no base URLs configured")
 	}
 
-	var wg sync.WaitGroup
 	totalDuration := time.Duration(r.cfg.Execution.DurationSeconds) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), totalDuration)
 	defer cancel()
 
-	ticker := time.NewTicker(time.Second / time.Duration(r.cfg.Execution.RequestsPerSecond))
-	defer ticker.Stop()
+	maxWorkers := r.cfg.Execution.MaxWorkers
+	queueDepth := r.cfg.Execution.MaxQueueDepth
+	jobs := make(chan struct{}, queueDepth)
+	var dropped atomic.Int64
 
-	// Start collector goroutine
 	collectorWg := sync.WaitGroup{}
 	collectorWg.Add(1)
 	go func() {
@@ -110,57 +128,73 @@ func (r *Runner) runFixedRPSMode() (*BenchmarkResult, error) {
 		}
 	}()
 
-loop:
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("Benchmark duration reached.")
-			break loop
-		case <-ticker.C:
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-
+	var workerWg sync.WaitGroup
+	for range maxWorkers {
+		workerWg.Add(1)
+		go func() {
+			defer workerWg.Done()
+			for range jobs {
 				endpointName, endpoint := r.selectEndpoint()
 				baseURL := r.selectBaseURL()
-
 				detail := r.makeRequest(baseURL, endpointName, endpoint)
 				r.resultsCh <- detail
-			}()
+			}
+		}()
+	}
+
+	limiter := rate.NewLimiter(rate.Limit(r.cfg.Execution.RequestsPerSecond), r.cfg.Execution.RateBurst)
+
+sched:
+	for {
+		if err := limiter.Wait(ctx); err != nil {
+			break
+		}
+		select {
+		case jobs <- struct{}{}:
+		case <-ctx.Done():
+			break sched
+		default:
+			dropped.Add(1)
 		}
 	}
 
-	wg.Wait()
+	close(jobs)
+	workerWg.Wait()
 	close(r.resultsCh)
 	collectorWg.Wait()
+
+	droppedN := dropped.Load()
+	if droppedN > 0 {
+		log.Printf("Scheduler dropped %d scheduled requests (queue full; workers could not keep up).", droppedN)
+	}
+	log.Println("Benchmark duration reached.")
 
 	agg := r.collector.GetResults()
 	log.Printf("Fixed RPS mode finished. Total requests attempted: %d", agg.TotalRequests)
 
 	return &BenchmarkResult{
-		TotalRequestsMade:  agg.TotalRequests,
-		SuccessfulRequests: agg.SuccessfulRequests,
-		FailedRequests:     agg.FailedRequests,
-		StatusCodes:        agg.StatusCodesCount,
+		TotalRequestsMade:        agg.TotalRequests,
+		SuccessfulRequests:       agg.SuccessfulRequests,
+		FailedRequests:           agg.FailedRequests,
+		DroppedDueToBackpressure: droppedN,
+		StatusCodes:              agg.StatusCodesCount,
 	}, nil
 }
 
 // selectEndpoint selects an endpoint based on the configured strategy
 func (r *Runner) selectEndpoint() (string, config.EndpointConfig) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	names := r.endpointNames
 	var selectedName string
 
-	switch r.cfg.EndpointSelection.Strategy {
+	switch strings.ToLower(r.cfg.EndpointSelection.Strategy) {
 	case "weighted":
 		selectedName = r.selectWeightedEndpoint(names)
 	case "random":
 		selectedName = r.selectRandomEndpoint(names)
-	default: // "roundRobin"
-		selectedName = names[r.endpointIdx%uint64(len(names))]
-		r.endpointIdx++
+	default: // roundRobin
+		n := uint64(len(names))
+		idx := r.endpointIdx.Add(1) - 1
+		selectedName = names[idx%n]
 	}
 
 	return selectedName, r.cfg.Endpoints[selectedName]
@@ -169,10 +203,9 @@ func (r *Runner) selectEndpoint() (string, config.EndpointConfig) {
 // selectWeightedEndpoint selects an endpoint using weighted selection
 func (r *Runner) selectWeightedEndpoint(names []string) string {
 	if len(r.cfg.EndpointSelection.Weights) == 0 {
-		// Fallback to round-robin
-		selected := names[r.endpointIdx%uint64(len(names))]
-		r.endpointIdx++
-		return selected
+		n := uint64(len(names))
+		idx := r.endpointIdx.Add(1) - 1
+		return names[idx%n]
 	}
 
 	totalWeight := 0.0
@@ -183,10 +216,9 @@ func (r *Runner) selectWeightedEndpoint(names []string) string {
 	}
 
 	if totalWeight == 0 {
-		// Fallback to round-robin
-		selected := names[r.endpointIdx%uint64(len(names))]
-		r.endpointIdx++
-		return selected
+		n := uint64(len(names))
+		idx := r.endpointIdx.Add(1) - 1
+		return names[idx%n]
 	}
 
 	ticketSpace := int64(totalWeight * 1000)
@@ -195,9 +227,9 @@ func (r *Runner) selectWeightedEndpoint(names []string) string {
 	}
 	num, err := rand.Int(rand.Reader, big.NewInt(ticketSpace))
 	if err != nil {
-		selected := names[r.endpointIdx%uint64(len(names))]
-		r.endpointIdx++
-		return selected
+		n := uint64(len(names))
+		idx := r.endpointIdx.Add(1) - 1
+		return names[idx%n]
 	}
 
 	target := float64(num.Int64()) / 1000.0
@@ -219,22 +251,18 @@ func (r *Runner) selectWeightedEndpoint(names []string) string {
 func (r *Runner) selectRandomEndpoint(names []string) string {
 	num, err := rand.Int(rand.Reader, big.NewInt(int64(len(names))))
 	if err != nil {
-		// Fallback to round-robin
-		selected := names[r.endpointIdx%uint64(len(names))]
-		r.endpointIdx++
-		return selected
+		n := uint64(len(names))
+		idx := r.endpointIdx.Add(1) - 1
+		return names[idx%n]
 	}
 	return names[num.Int64()]
 }
 
 // selectBaseURL selects a base URL (round-robin for now)
 func (r *Runner) selectBaseURL() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	selected := r.cfg.BaseUrls[r.urlIdx%uint64(len(r.cfg.BaseUrls))]
-	r.urlIdx++
-	return selected
+	n := uint64(len(r.cfg.BaseUrls))
+	idx := r.urlIdx.Add(1) - 1
+	return r.cfg.BaseUrls[idx%n]
 }
 
 // makeRequest creates and executes an HTTP request with parameter generation
